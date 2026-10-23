@@ -13,6 +13,7 @@
   h1 { font-size:1.5rem; margin:0 0 4px; }
   .sub { color:var(--muted); font-size:.9rem; margin-bottom:24px; }
   button { font:inherit; cursor:pointer; border:0; border-radius:12px; color:var(--ink); -webkit-appearance:none; appearance:none; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
   .primary { background:var(--accent); color:#fff; padding:14px 28px; font-size:1.05rem; }
   .ghost { background:transparent; color:var(--muted); padding:10px; text-decoration:underline; }
   .progress { height:8px; background:#ddd7c8; border-radius:99px; overflow:hidden; margin:0 0 6px; }
@@ -21,12 +22,13 @@
   .versus { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
   .song { background:var(--card); padding:36px 10px; border-radius:16px; box-shadow:0 2px 8px #0001;
           font-size:1.15rem; font-weight:600; transition:transform .1s; }
-  .song:hover { transform:translateY(-2px); }
+  .song:hover:not(:disabled) { transform:translateY(-2px); }
   .song small { display:block; margin-top:8px; font-weight:400; color:var(--muted); font-size:.8rem; }
   .row { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px; }
   .row button { background:#e8e2d3; padding:14px; }
+  .control-row { display:flex; justify-content:center; gap:16px; margin-top:8px; }
   ol { text-align:left; background:var(--card); border-radius:16px; padding:16px 16px 16px 44px;
-       box-shadow:0 2px 8px #0001; }
+        box-shadow:0 2px 8px #0001; }
   li { padding:6px 0; border-bottom:1px solid #eee; }
   li:last-child { border:0; }
   li small { color:var(--muted); margin-left:6px; }
@@ -55,7 +57,10 @@
       <button id="tie">둘 다 좋다</button>
       <button id="skip">모르겠다</button>
     </div>
-    <button class="ghost" id="restart1">처음부터 다시</button>
+    <div class="control-row">
+      <button class="ghost" id="undo" disabled>하나 되돌리기</button>
+      <button class="ghost" id="restart1">처음부터 다시</button>
+    </div>
   </section>
 
   <section id="result" class="hidden">
@@ -71,16 +76,21 @@
 <script src="songs.js"></script>
 <script>
 const $ = id => document.getElementById(id);
-document.title = SORT_TITLE;
-$("title").textContent = SORT_TITLE;
-$("info").textContent = `총 ${SONGS.length}곡을 비교합니다.`;
 
-let resolver = null;
-let done = 0;
-let total = 1;
-let runId = 0;
+// SONGS가 없을 경우 대비 기본 타이틀 설정
+const titleText = typeof SORT_TITLE !== 'undefined' ? SORT_TITLE : "산보 노래 소트";
+document.title = titleText;
+$("title").textContent = titleText;
+if (typeof SONGS !== 'undefined') {
+  $("info").textContent = `총 ${SONGS.length}곡을 비교합니다.`;
+}
 
-// 예상 최대 비교 횟수 (병합 정렬)
+// 상태 변수들
+let historyStack = []; // 되돌리기를 위한 기록 스택
+let doneCount = 0;
+let estimatedTotal = 1;
+
+// 예상 비교 횟수
 function estimate(n) {
   return Math.max(1, Math.ceil(n * Math.log2(n) - n + 1));
 }
@@ -98,59 +108,151 @@ function showSong(btn, s) {
   btn.innerHTML = "";
   btn.append(s.title);
   const sm = document.createElement("small");
-  sm.textContent = s.album;
+  sm.textContent = s.album || "";
   btn.appendChild(sm);
 }
 
-function ask(a, b) {
-  showSong($("left"), a);
-  showSong($("right"), b);
-  return new Promise(res => { resolver = res; });
+// 정렬 상태 객체 초기화 (상향식 Merge Sort)
+function createInitialState(list) {
+  // list의 각 원소를 개별 배열로 래핑
+  const initialList = list.map(item => [item]);
+  return {
+    lst: initialList, // 현재 병합 중인 단계의 리스트 배열
+    parentLst: [],   // 다음 단계로 넘어갈 병합 완료 리스트들
+    i: 0,            // lst에서 병합할 첫 번째 항목 인덱스
+    j: 1,            // lst에서 병합할 두 번째 항목 인덱스
+    headL: 0,        // 좌측 리스트 내 현재 비교 포인터
+    headR: 0,        // 우측 리스트 내 현재 비교 포인터
+    merged: []       // 현재 두 리스트 병합 중 생성되고 있는 배열
+  };
 }
 
-function answer(v) {
-  if (!resolver) return;
-  const r = resolver;
-  resolver = null;
-  done++;
-  const pct = Math.min(100, Math.round(done / total * 100));
-  $("bar").style.width = pct + "%";
-  $("count").textContent = `${pct}% 진행 · ${done}번 비교`;
-  r(v);
+// 깊은 복사 (스택에 저장용)
+function cloneState(state) {
+  return JSON.parse(JSON.stringify(state));
 }
 
-async function mergeSort(arr, id) {
-  if (arr.length <= 1) return arr;
-  const mid = Math.floor(arr.length / 2);
-  const left = await mergeSort(arr.slice(0, mid), id);
-  const right = await mergeSort(arr.slice(mid), id);
-  if (id !== runId) return arr;
-  const out = [];
-  let i = 0, j = 0;
-  while (i < left.length && j < right.length) {
-    const v = await ask(left[i], right[j]);
-    if (id !== runId) return arr;
-    if (v === "right") out.push(right[j++]);
-    else out.push(left[i++]);   // left / 둘 다 좋다 / 모르겠다는 기존 순서 유지
-  }
-  while (i < left.length) out.push(left[i++]);
-  while (j < right.length) out.push(right[j++]);
-  return out;
-}
+let currentState = null;
 
-async function start() {
-  runId++;
-  const id = runId;
-  done = 0;
-  total = estimate(SONGS.length);
-  $("bar").style.width = "0%";
-  $("count").textContent = "0% 진행";
+function start() {
+  doneCount = 0;
+  historyStack = [];
+  estimatedTotal = estimate(SONGS.length);
+
   $("start").classList.add("hidden");
   $("result").classList.add("hidden");
   $("game").classList.remove("hidden");
-  const sorted = await mergeSort(shuffle(SONGS), id);
-  if (id !== runId) return;
-  showResult(sorted);
+
+  const shuffled = shuffle(SONGS);
+  currentState = createInitialState(shuffled);
+  
+  processStep();
+}
+
+// 현재 상태에 맞게 비교 항목을 화면에 표시하거나, 다음 병합 단계/결과로 이동
+function processStep() {
+  const s = currentState;
+
+  // 비어있는 경우 처리
+  if (s.lst.length === 0) {
+    showResult([]);
+    return;
+  }
+
+  // 1. 현재 병합 진행 중인 경우
+  if (s.j < s.lst.length) {
+    const leftArr = s.lst[s.i];
+    const rightArr = s.lst[s.j];
+
+    // 둘 중 하나라도 남은 요소가 있으면 비교 계속 진행
+    if (s.headL < leftArr.length && s.headR < rightArr.length) {
+      showSong($("left"), leftArr[s.headL]);
+      showSong($("right"), rightArr[s.headR]);
+      updateUI();
+      return;
+    }
+
+    // 한쪽 리스트 비교가 끝나면 잔여 요소 정리
+    while (s.headL < leftArr.length) s.merged.push(leftArr[s.headL++]);
+    while (s.headR < rightArr.length) s.merged.push(rightArr[s.headR++]);
+
+    // 병합 완료된 결과를 parentLst에 추가
+    s.parentLst.push(s.merged);
+
+    // 다음 인덱스로 이동
+    s.i += 2;
+    s.j += 2;
+    s.headL = 0;
+    s.headR = 0;
+    s.merged = [];
+
+    // 반복 실행
+    processStep();
+    return;
+  }
+
+  // 2. 현재 패스(Pass)에서 짝을 이루지 못하고 남은 단일 요소가 있다면 그대로 승급
+  if (s.i < s.lst.length) {
+    s.parentLst.push(s.lst[s.i]);
+  }
+
+  // 3. 패스 종료 -> 다음 단계 Pass로 전환
+  if (s.parentLst.length > 1) {
+    s.lst = s.parentLst;
+    s.parentLst = [];
+    s.i = 0;
+    s.j = 1;
+    s.headL = 0;
+    s.headR = 0;
+    s.merged = [];
+    processStep();
+    return;
+  }
+
+  // 4. 리스트가 1개만 남으면 정렬 완전 완료!
+  if (s.parentLst.length === 1) {
+    showResult(s.parentLst[0]);
+  }
+}
+
+function answer(choice) {
+  // 현 상태를 히스토리에 기록 (깊은 복사)
+  historyStack.push({
+    state: cloneState(currentState),
+    doneCount: doneCount
+  });
+
+  const s = currentState;
+  const leftArr = s.lst[s.i];
+  const rightArr = s.lst[s.j];
+
+  // 선택 결과 처리
+  if (choice === "right") {
+    s.merged.push(rightArr[s.headR++]);
+  } else {
+    // left, tie, skip 모두 left 선택으로 처리
+    s.merged.push(leftArr[s.headL++]);
+  }
+
+  doneCount++;
+  processStep();
+}
+
+function undo() {
+  if (historyStack.length === 0) return;
+
+  const prev = historyStack.pop();
+  currentState = prev.state;
+  doneCount = prev.doneCount;
+
+  processStep();
+}
+
+function updateUI() {
+  const pct = Math.min(100, Math.round((doneCount / estimatedTotal) * 100));
+  $("bar").style.width = pct + "%";
+  $("count").textContent = `${pct}% 진행 · ${doneCount}번 비교`;
+  $("undo").disabled = historyStack.length === 0;
 }
 
 function showResult(list) {
@@ -162,25 +264,32 @@ function showResult(list) {
     const li = document.createElement("li");
     li.append(s.title);
     const sm = document.createElement("small");
-    sm.textContent = s.album;
+    sm.textContent = s.album || "";
     li.appendChild(sm);
     ol.appendChild(li);
   });
   window.__lastResult = list;
 }
 
+// 이벤트 바인딩
 $("startBtn").onclick = start;
 $("left").onclick = () => answer("left");
 $("right").onclick = () => answer("right");
 $("tie").onclick = () => answer("tie");
 $("skip").onclick = () => answer("skip");
+$("undo").onclick = undo;
 $("restart1").onclick = start;
 $("restart2").onclick = start;
 $("copy").onclick = async () => {
-  const text = `[${SORT_TITLE}]\n` +
+  const text = `[${titleText}]\n` +
     window.__lastResult.map((s, i) => `${i + 1}. ${s.title}`).join("\n");
-  try { await navigator.clipboard.writeText(text); $("copy").textContent = "복사 완료!"; }
-  catch { prompt("아래 내용을 복사하세요", text); }
+  try { 
+    await navigator.clipboard.writeText(text); 
+    $("copy").textContent = "복사 완료!"; 
+    setTimeout(() => { $("copy").textContent = "결과 복사"; }, 2000);
+  } catch { 
+    prompt("아래 내용을 복사하세요", text); 
+  }
 };
 </script>
 </body>
