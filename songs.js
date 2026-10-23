@@ -16,8 +16,8 @@ const SONGS = [
   // 싱글
   { title: "hey", album: "싱글" },
   { title: "Imagination", album: "싱글" },
-  { title: "머지사이드", album: "bright #15" },
-  { title: "멀리써", album: "싱글" },
+  { title: "머지사이드", album: "싱글" },
+  { title: "멀리써", album: "bright #15" },
 
   // 정규 1집 [룸펜] (2024.09.19)
   { title: "와부와부", album: "룸펜" },
