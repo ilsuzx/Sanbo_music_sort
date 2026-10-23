@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>산보 노래 소트</title>
+<style>
+  :root { --bg:#f6f3ec; --ink:#222; --card:#fff; --accent:#3b6e5a; --muted:#8a8a8a; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:-apple-system,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;
+         background:var(--bg); color:var(--ink); display:flex; justify-content:center; }
+  main { width:100%; max-width:560px; padding:28px 16px 48px; text-align:center; }
+  h1 { font-size:1.5rem; margin:0 0 4px; }
+  .sub { color:var(--muted); font-size:.9rem; margin-bottom:24px; }
+  button { font:inherit; cursor:pointer; border:0; border-radius:12px; }
+  .primary { background:var(--accent); color:#fff; padding:14px 28px; font-size:1.05rem; }
+  .ghost { background:transparent; color:var(--muted); padding:10px; text-decoration:underline; }
+  .progress { height:8px; background:#ddd7c8; border-radius:99px; overflow:hidden; margin:0 0 6px; }
+  .bar { height:100%; width:0; background:var(--accent); transition:width .2s; }
+  .count { color:var(--muted); font-size:.85rem; margin-bottom:18px; }
+  .versus { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .song { background:var(--card); padding:36px 10px; border-radius:16px; box-shadow:0 2px 8px #0001;
+          font-size:1.15rem; font-weight:600; transition:transform .1s; }
+  .song:hover { transform:translateY(-2px); }
+  .song small { display:block; margin-top:8px; font-weight:400; color:var(--muted); font-size:.8rem; }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px; }
+  .row button { background:#e8e2d3; padding:14px; }
+  ol { text-align:left; background:var(--card); border-radius:16px; padding:16px 16px 16px 44px;
+       box-shadow:0 2px 8px #0001; }
+  li { padding:6px 0; border-bottom:1px solid #eee; }
+  li:last-child { border:0; }
+  li small { color:var(--muted); margin-left:6px; }
+  .hidden { display:none; }
+  .actions { display:flex; gap:10px; justify-content:center; margin-top:16px; flex-wrap:wrap; }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="title"></h1>
+  <div class="sub">마음에 드는 곡을 골라 나만의 산보 순위를 만들어봐요</div>
+
+  <section id="start">
+    <p id="info"></p>
+    <button class="primary" id="startBtn">시작하기</button>
+  </section>
+
+  <section id="game" class="hidden">
+    <div class="progress"><div class="bar" id="bar"></div></div>
+    <div class="count" id="count"></div>
+    <div class="versus">
+      <button class="song" id="left"></button>
+      <button class="song" id="right"></button>
+    </div>
+    <div class="row">
+      <button id="tie">둘 다 좋다</button>
+      <button id="skip">모르겠다</button>
+    </div>
+    <button class="ghost" id="restart1">처음부터 다시</button>
+  </section>
+
+  <section id="result" class="hidden">
+    <h2>나의 산보 노래 순위</h2>
+    <ol id="rank"></ol>
+    <div class="actions">
+      <button class="primary" id="copy">결과 복사</button>
+      <button class="ghost" id="restart2">다시 하기</button>
+    </div>
+  </section>
+</main>
+
+<script src="songs.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+document.title = SORT_TITLE;
+$("title").textContent = SORT_TITLE;
+$("info").textContent = `총 ${SONGS.length}곡을 비교합니다.`;
+
+let resolver = null;
+let done = 0;
+let total = 1;
+let runId = 0;
+
+// 예상 최대 비교 횟수 (병합 정렬)
+function estimate(n) {
+  return Math.max(1, Math.ceil(n * Math.log2(n) - n + 1));
+}
+
+function shuffle(a) {
+  a = a.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function showSong(btn, s) {
+  btn.innerHTML = "";
+  btn.append(s.title);
+  const sm = document.createElement("small");
+  sm.textContent = s.album;
+  btn.appendChild(sm);
+}
+
+function ask(a, b) {
+  showSong($("left"), a);
+  showSong($("right"), b);
+  return new Promise(res => { resolver = res; });
+}
+
+function answer(v) {
+  if (!resolver) return;
+  const r = resolver;
+  resolver = null;
+  done++;
+  const pct = Math.min(100, Math.round(done / total * 100));
+  $("bar").style.width = pct + "%";
+  $("count").textContent = `${pct}% 진행 · ${done}번 비교`;
+  r(v);
+}
+
+async function mergeSort(arr, id) {
+  if (arr.length <= 1) return arr;
+  const mid = Math.floor(arr.length / 2);
+  const left = await mergeSort(arr.slice(0, mid), id);
+  const right = await mergeSort(arr.slice(mid), id);
+  if (id !== runId) return arr;
+  const out = [];
+  let i = 0, j = 0;
+  while (i < left.length && j < right.length) {
+    const v = await ask(left[i], right[j]);
+    if (id !== runId) return arr;
+    if (v === "right") out.push(right[j++]);
+    else out.push(left[i++]);   // left / 둘 다 좋다 / 모르겠다는 기존 순서 유지
+  }
+  while (i < left.length) out.push(left[i++]);
+  while (j < right.length) out.push(right[j++]);
+  return out;
+}
+
+async function start() {
+  runId++;
+  const id = runId;
+  done = 0;
+  total = estimate(SONGS.length);
+  $("bar").style.width = "0%";
+  $("count").textContent = "0% 진행";
+  $("start").classList.add("hidden");
+  $("result").classList.add("hidden");
+  $("game").classList.remove("hidden");
+  const sorted = await mergeSort(shuffle(SONGS), id);
+  if (id !== runId) return;
+  showResult(sorted);
+}
+
+function showResult(list) {
+  $("game").classList.add("hidden");
+  $("result").classList.remove("hidden");
+  const ol = $("rank");
+  ol.innerHTML = "";
+  list.forEach(s => {
+    const li = document.createElement("li");
+    li.append(s.title);
+    const sm = document.createElement("small");
+    sm.textContent = s.album;
+    li.appendChild(sm);
+    ol.appendChild(li);
+  });
+  window.__lastResult = list;
+}
+
+$("startBtn").onclick = start;
+$("left").onclick = () => answer("left");
+$("right").onclick = () => answer("right");
+$("tie").onclick = () => answer("tie");
+$("skip").onclick = () => answer("skip");
+$("restart1").onclick = start;
+$("restart2").onclick = start;
+$("copy").onclick = async () => {
+  const text = `[${SORT_TITLE}]\n` +
+    window.__lastResult.map((s, i) => `${i + 1}. ${s.title}`).join("\n");
+  try { await navigator.clipboard.writeText(text); $("copy").textContent = "복사 완료!"; }
+  catch { prompt("아래 내용을 복사하세요", text); }
+};
+</script>
+</body>
+</html>
