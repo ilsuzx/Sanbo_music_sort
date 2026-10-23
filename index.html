@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>산보 최애 곡 소트</title>
+<title>산보 노래 소트</title>
 <style>
   :root { --bg:#f6f3ec; --ink:#222; --card:#fff; --accent:#3b6e5a; --muted:#8a8a8a; }
   * { box-sizing: border-box; }
@@ -64,7 +64,7 @@
   </section>
 
   <section id="result" class="hidden">
-    <h2>나의 산보 노래 순위</h2>
+    <h2>당신의 산보 노래 순위!!!</h2>
     <ol id="rank"></ol>
     <div class="actions">
       <button class="primary" id="copy">결과 복사</button>
@@ -82,7 +82,7 @@ const titleText = typeof SORT_TITLE !== 'undefined' ? SORT_TITLE : "산보 노�
 document.title = titleText;
 $("title").textContent = titleText;
 if (typeof SONGS !== 'undefined') {
-  $("info").textContent = `총 ${SONGS.length}곡을 비교합니다.`;
+  $("info").textContent = `총 ${SONGS.length}곡을 비교합니다!`;
 }
 
 // 상태 변수들
